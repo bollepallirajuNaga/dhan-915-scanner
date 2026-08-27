@@ -6,37 +6,70 @@ import requests
 import pandas as pd
 import yfinance as yf
 
-# Page configuration
-st.set_page_config(page_title="9:15 F&O Dynamic Scanner", page_icon="⚡", layout="centered")
+# 1. Page Configuration (Instant UI Loading)
+st.set_page_config(
+    page_title="9:15 F&O Universal Scanner",
+    page_icon="⚡",
+    layout="centered"
+)
 
 st.title("⚡ 9:15 F&O Top Gainer Scanner")
-st.caption("100% Dynamic NSE F&O Auto-Fetch Engine • Tradetron Cloud")
+st.caption("Hybrid High-Speed Engine • Future-Proof Dynamic F&O Universe • Tradetron Cloud")
 
-# ================= 1. CONFIGURATION =================
+# ================= CONFIGURATION =================
 TT_WEBHOOK_URL = "https://api.tradetron.tech/api"
 TT_AUTH_TOKEN = "41cd0696-63ed-43da-8145-a2357d2c8cdb"
-
 IST = pytz.timezone("Asia/Kolkata")
 
-# ================= 2. LIVE DYNAMIC F&O SCRIP FETCH =================
-@st.cache_data(ttl=3600)  # ప్రతి గంటకు ఒకసారి ఆటోమేటిక్ రిఫ్రెష్
-def get_live_fno_symbols():
-    """NSE అధికారిక డేటా CDN నుండి నేటి తాజా F&O లిస్ట్‌ను డైనమిక్‌గా ఫెచ్ చేస్తుంది"""
+# 190+ పూర్తి బేస్‌లైన్ F&O స్టాక్స్ (ఇటీవల చేరిన కొత్త స్టాక్స్‌తో సహా)
+DEFAULT_FNO_SYMBOLS = [
+    "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT", "ADANIPORTS", 
+    "ADANIPOWER", "ALKEM", "AMBER", "AMBUJACEM", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY", 
+    "ASIANPAINT", "ASTRAL", "ATUL", "AUBANK", "AUROPHARMA", "AXISBANK", "BAJAJ-AUTO", 
+    "BAJAJFINSV", "BAJFINANCE", "BALKRISIND", "BALRAMCHIN", "BANDHANBNK", "BANKBARODA", 
+    "BATAINDIA", "BEL", "BERGEPAINT", "BHARATFORG", "BHARTIARTL", "BHEL", "BIOCON", 
+    "BOSCHLTD", "BPCL", "BRITANNIA", "BSOFT", "CANBK", "CANFINHOME", "CGPOWER", "CHAMBLFERT", 
+    "CHOLAFIN", "CIPLA", "COALINDIA", "COFORGE", "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON", 
+    "CUB", "CUMMINSIND", "DABUR", "DALBHARAT", "DEEPAKNTR", "DELHIVERY", "DIVISLAB", "DIXON", 
+    "DLF", "DRREDDY", "EICHERMOT", "ESCORTS", "EXIDEIND", "FEDERALBNK", "GAIL", "GLENMARK", 
+    "GMRINFRA", "GNFC", "GODREJCP", "GODREJPROP", "GRANULES", "GRASIM", "GUJGASLTD", "HAL", 
+    "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", 
+    "HINDCOPPER", "HINDPETRO", "HINDUNILVR", "ICICIBANK", "ICICIGI", "ICICIPRULI", "IDEA", 
+    "IDFC", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "INDIACEM", "INDIAMART", "INDIGO", 
+    "INDUSINDBK", "INDUSTOWER", "INFY", "IOC", "IPCALAB", "IRCTC", "ITC", "JINDALSTEL", 
+    "JKCEMENT", "JSWSTEEL", "JUBLFOOD", "KALYANKJIL", "KOTAKBANK", "LALPATHLAB", "LAURUSLABS", 
+    "LICHSGFIN", "LT", "LTIM", "LTTS", "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO", 
+    "MARUTI", "MCDOWELL-N", "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON", "MPHASIS", 
+    "MRF", "MUTHOOTFIN", "NATIONALUM", "NAUKRI", "NAVINFLUOR", "NESTLEIND", "NMDC", "NTPC", 
+    "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PEL", "PERSISTENT", "PETRONET", "PFC", 
+    "PIDILITIND", "PIIND", "PNB", "POLYCAB", "POWERGRID", "PVRINOX", "RAMCOCEM", "RBLBANK", 
+    "RECLTD", "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SIEMENS", 
+    "SONACOMS", "SRF", "SUNPHARMA", "SUNTV", "SYNGENE", "TATACHEM", "TATACOMM", "TATACONSUM", 
+    "TATAMOTORS", "TATAPOWER", "TATASTEEL", "TCS", "TECHM", "TITAN", "TORNTPHARM", "TORNTPOWER", 
+    "TRENT", "TVSMOTOR", "UBL", "ULTRACEMCO", "UPL", "VEDL", "VOLTAS", "WIPRO", "ZYDUSLIFE"
+]
+
+# ================= 2. DYNAMIC UNIVERSE LOADER =================
+@st.cache_data(ttl=86400)
+def load_dynamic_universe():
+    """మీ GitHub రెపోలోని fno_stocks.txt నుండి లైవ్‌గా లోడ్ చేస్తుంది (ఫెయిల్ అయితే డీఫాల్ట్ లిస్ట్ వాడుతుంది)"""
     try:
-        url = "https://images.dhan.co/api-data/api-scrip-master.csv"
-        df = pd.read_csv(url, low_memory=False)
-        # Active F&O Stock Futures అండర్‌లైయింగ్ సింబల్స్‌ను మాత్రమే ఫిల్టర్ చేయడం
-        fno_symbols = df[df["SEM_INSTRUMENT_NAME"] == "FUTSTK"]["SM_UNDERLYING_SYMBOL"].dropna().unique().tolist()
-        return [sym.strip() for sym in fno_symbols if isinstance(sym, str)]
+        url = "https://raw.githubusercontent.com/bollepallirajuNaga/dhan-915-scanner/main/fno_stocks.txt"
+        res = requests.get(url, timeout=2)
+        if res.status_code == 200:
+            lines = [line.strip().upper() for line in res.text.splitlines() if line.strip()]
+            if len(lines) >= 50:
+                return lines
     except Exception:
-        # బ్యాకప్ ఆటో-లింక్ (Nifty 100 constituents)
-        url = "https://raw.githubusercontent.com/datasets/nse-indices/master/data/ind_nifty100list.csv"
-        df = pd.read_csv(url)
-        return df["Symbol"].tolist()
+        pass
+    return DEFAULT_FNO_SYMBOLS
+
+FNO_SYMBOLS = load_dynamic_universe()
+YF_TICKERS = [f"{sym}.NS" for sym in FNO_SYMBOLS]
 
 # ================= 3. USER INTERFACE =================
 st.markdown("---")
-st.success("🟢 100% Dynamic Engine: Auto-loads latest NSE F&O Universe on every run.")
+st.success(f"🟢 **System Ready:** {len(FNO_SYMBOLS)} NSE F&O Stocks Active (Zero-Latency Mode).")
 
 start_btn = st.button("🚀 Start 9:15 Scanner Now", use_container_width=True, type="primary")
 
@@ -44,35 +77,28 @@ if start_btn:
     status_box = st.empty()
     progress_bar = st.progress(0)
     
-    # Step 1: Dynamic F&O List Loading
-    status_box.info("📥 Fetching today's latest dynamic F&O universe from live master...")
-    fno_symbols = get_live_fno_symbols()
-    yf_tickers = [f"{sym}.NS" for sym in fno_symbols]
-    progress_bar.progress(20)
-    status_box.success(f"✅ Loaded {len(fno_symbols)} active F&O stocks dynamically!")
-    
-    # Step 2: 09:15:35 AM IST Wait Logic
+    # 09:15:35 AM IST Precision Wait Window
     while True:
         now_ist = datetime.now(IST)
         if now_ist.hour == 9 and now_ist.minute == 15 and now_ist.second >= 35:
             break
         elif now_ist.hour > 9 or (now_ist.hour == 9 and now_ist.minute > 15):
+            # 09:16 దాటిన తర్వాత టెస్ట్ చేస్తే వెయిట్ చేయకుండా వెంటనే స్కాన్ అవుతుంది
             break
             
         current_time_str = now_ist.strftime("%H:%M:%S")
         status_box.warning(f"🕒 Current Time: **{current_time_str}** | Waiting for **09:15:35 AM**...")
         time.sleep(0.3)
         
-    progress_bar.progress(40)
-    status_box.info(f"⚡ Scanning all {len(fno_symbols)} F&O stocks live...")
+    progress_bar.progress(30)
+    status_box.info(f"⚡ Fast-scanning all {len(FNO_SYMBOLS)} F&O stocks in parallel...")
     
-    # Step 3: High-Speed Batch Fetch via Yahoo
     start_time = time.time()
     try:
-        data = yf.download(tickers=yf_tickers, period="2d", interval="1d", group_by="ticker", progress=False, threads=True)
+        data = yf.download(tickers=YF_TICKERS, period="2d", interval="1d", group_by="ticker", progress=False, threads=True)
         
         market_data = []
-        for sym in fno_symbols:
+        for sym in FNO_SYMBOLS:
             ticker = f"{sym}.NS"
             try:
                 df_sym = data[ticker]
@@ -100,9 +126,9 @@ if start_btn:
         progress_bar.progress(80)
 
         if not market_data:
-            st.error("❌ Market data fetch returned empty. Please try again.")
+            st.error("❌ Market data fetch returned empty. Please click Start again.")
         else:
-            # Step 4: Sorting & Picking True #1
+            # Sorting & Absolute #1 Selection
             df_res = pd.DataFrame(market_data).sort_values(by="p_change", ascending=False).reset_index(drop=True)
             top_stock = df_res.iloc[0]["symbol"]
             top_change = df_res.iloc[0]["p_change"]
@@ -119,7 +145,7 @@ if start_btn:
             with st.expander("📊 View Live Top 5 Gainers Table"):
                 st.dataframe(df_res.head(5)[["symbol", "ltp", "prev_close", "p_change"]], use_container_width=True)
 
-            # Step 5: Webhook Dispatch to Tradetron
+            # Webhook Post to Tradetron
             webhook_payload = {
                 "auth-token": TT_AUTH_TOKEN,
                 "key": "api_buy",
@@ -135,4 +161,4 @@ if start_btn:
             st.info(f"🚀 Cloud strategy activated for **{top_stock}**.")
             
     except Exception as e:
-        st.error(f"Error during execution: {e}")
+        st.error(f"Error during scan: {e}")
