@@ -16,7 +16,7 @@ st.title("⚡ 9:15 F&O Top Gainer Scanner")
 st.caption("100% Direct REST API Engine • All 185+ F&O Stocks • Tradetron Cloud")
 
 # ================= 1. CONFIGURATION =================
-CLIENT_ID = "1113235897"            # మీ 10-అంకెల Dhan Client ID
+CLIENT_ID = "1113235897"                     # మీ Dhan Client ID
 TT_WEBHOOK_URL = "https://api.tradetron.tech/api"
 TT_AUTH_TOKEN = "41cd0696-63ed-43da-8145-a2357d2c8cdb" # మీ Tradetron Auth Token
 
@@ -62,7 +62,6 @@ FNO_MAP = {
     "UPL": 11287, "VEDL": 3063, "VOLTAS": 3718, "WIPRO": 3787, "ZYDUSLIFE": 4150
 }
 
-# Reverse mapping ID to Symbol
 ID_TO_SYMBOL = {v: k for k, v in FNO_MAP.items()}
 
 # ================= 3. USER INTERFACE =================
@@ -78,9 +77,12 @@ if start_btn:
         status_box = st.empty()
         progress_bar = st.progress(0)
         
+        token_clean = access_token.strip()
+        client_clean = CLIENT_ID.strip()
+        
         headers = {
-            "access-token": access_token.strip(),
-            "client-id": CLIENT_ID.strip(),
+            "access-token": token_clean,
+            "client-id": client_clean,
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
@@ -98,14 +100,13 @@ if start_btn:
             time.sleep(0.3)
             
         progress_bar.progress(30)
-        status_box.info(f"⚡ Fetching live market quotes for all {len(FNO_MAP)} F&O stocks...")
+        status_box.info(f"⚡ Fetching live quotes for {len(FNO_MAP)} F&O stocks...")
         
-        # 2. Dhan Direct REST API Batch Call
+        # 2. Batch Fetch
         market_data = []
         sec_ids = list(FNO_MAP.values())
-        
-        # Dhan batch quote endpoint (supports chunks of 100)
         chunk_size = 100
+        
         for i in range(0, len(sec_ids), chunk_size):
             chunk = sec_ids[i:i + chunk_size]
             payload = {"NSE_EQ": chunk}
@@ -115,11 +116,12 @@ if start_btn:
                     "https://api.dhan.co/v2/marketfeed/ohlc",
                     headers=headers,
                     json=payload,
-                    timeout=5
+                    timeout=8
                 )
                 
                 if res.status_code == 200:
-                    data = res.json().get("data", {}).get("NSE_EQ", {})
+                    resp_json = res.json()
+                    data = resp_json.get("data", {}).get("NSE_EQ", {})
                     for sec_id_str, quote in data.items():
                         sec_id_int = int(sec_id_str)
                         symbol = ID_TO_SYMBOL.get(sec_id_int)
@@ -136,16 +138,15 @@ if start_btn:
                                     "prev_close": prev_close,
                                     "p_change": p_change
                                 })
-                elif res.status_code == 401:
-                    st.error("❌ Invalid or Expired Dhan Access Token! Please generate a new one from Dhan Web.")
-                    st.stop()
+                else:
+                    st.error(f"⚠️ API Response [{res.status_code}]: {res.text}")
             except Exception as e:
-                continue
+                st.error(f"Network error: {e}")
 
         progress_bar.progress(80)
 
         if not market_data:
-            st.error("❌ Market data fetch failed. Verify Dhan Token or check if market quotes are live.")
+            st.error("❌ Market data is empty. Verify token or market status.")
         else:
             # 3. Precision Ranking
             df = pd.DataFrame(market_data).sort_values(by="p_change", ascending=False).reset_index(drop=True)
@@ -161,7 +162,6 @@ if start_btn:
                 f"Gain: **+{top_change:.2f}%** (Analyzed {len(market_data)} stocks)"
             )
             
-            # Show Top 5 for confirmation
             with st.expander("📊 View Top 5 Gainers Table"):
                 st.dataframe(df.head(5)[["symbol", "ltp", "prev_close", "p_change"]], use_container_width=True)
 
@@ -174,13 +174,12 @@ if start_btn:
             }
             
             try:
-                # Direct URL with Query Params + JSON for guaranteed Tradetron ingestion
                 webhook_url_full = f"{TT_WEBHOOK_URL}?auth-token={TT_AUTH_TOKEN}&key=api_buy&value=1&symbol={top_stock}"
                 res = requests.post(webhook_url_full, json=webhook_payload, timeout=8)
                 
                 progress_bar.progress(100)
                 st.balloons()
-                st.success(f"✅ **Signal Sent to Tradetron Successfully!** (Response Code: {res.status_code})")
-                st.info(f"🚀 Tradetron strategy is now active on cloud for **{top_stock}**. You can close this screen.")
+                st.success(f"✅ **Signal Sent to Tradetron!** (Response: {res.status_code})")
+                st.info(f"🚀 Tradetron strategy is now active on cloud for **{top_stock}**.")
             except Exception as e:
                 st.error(f"⚠️ Webhook Delivery Failed: {e}")
