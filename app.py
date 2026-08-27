@@ -1,159 +1,154 @@
 import streamlit as st
-import time
-from datetime import datetime
-import pytz
-import requests
 import pandas as pd
+import requests
+import datetime
+import time
 import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor
 
-# 1. Page Configuration
-st.set_page_config(
-    page_title="9:15 F&O Universal Scanner",
-    page_icon="⚡",
-    layout="centered"
+# Page Configuration
+st.set_page_config(page_title="9:15 NIFTY 50 Scanner", page_icon="🎯", layout="wide")
+
+st.title("🎯 9:15 NIFTY 50 Scanner & Tradetron Bridge")
+st.caption("Auto-picks the #1 Top Gainer at 09:15:35 AM IST and pushes it to Tradetron")
+
+# IST Timezone Setup
+IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+# --- SIDEBAR CONFIGURATION ---
+st.sidebar.header("⚙️ Settings & Credentials")
+tradetron_auth_token = st.sidebar.text_input(
+    "Tradetron Auth Token",
+    type="password",
+    help="Enter your Tradetron webhook auth token"
 )
 
-st.title("⚡ 9:15 F&O Top Gainer Scanner")
-st.caption("100% Complete Universe Engine • Tradetron Cloud")
-
-# ================= CONFIGURATION =================
-TT_WEBHOOK_URL = "https://api.tradetron.tech/api"
-TT_AUTH_TOKEN = "41cd0696-63ed-43da-8145-a2357d2c8cdb"
-IST = pytz.timezone("Asia/Kolkata")
-
-# 190+ Base Universe
-DEFAULT_FNO_SYMBOLS = [
-    "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT", "ADANIPORTS", 
-    "ADANIPOWER", "ALKEM", "AMBER", "AMBUJACEM", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY", 
-    "ASIANPAINT", "ASTRAL", "ATUL", "AUBANK", "AUROPHARMA", "AXISBANK", "BAJAJ-AUTO", 
-    "BAJAJFINSV", "BAJFINANCE", "BALKRISIND", "BALRAMCHIN", "BANDHANBNK", "BANKBARODA", 
-    "BATAINDIA", "BEL", "BERGEPAINT", "BHARATFORG", "BHARTIARTL", "BHEL", "BIOCON", 
-    "BOSCHLTD", "BPCL", "BRITANNIA", "BSOFT", "CANBK", "CANFINHOME", "CGPOWER", "CHAMBLFERT", 
-    "CHOLAFIN", "CIPLA", "COALINDIA", "COFORGE", "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON", 
-    "CUB", "CUMMINSIND", "DABUR", "DALBHARAT", "DEEPAKNTR", "DELHIVERY", "DIVISLAB", "DIXON", 
-    "DLF", "DRREDDY", "EICHERMOT", "ESCORTS", "EXIDEIND", "FEDERALBNK", "GAIL", "GLENMARK", 
-    "GMRINFRA", "GNFC", "GODREJCP", "GODREJPROP", "GRANULES", "GRASIM", "GUJGASLTD", "HAL", 
-    "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", 
-    "HINDCOPPER", "HINDPETRO", "HINDUNILVR", "ICICIBANK", "ICICIGI", "ICICIPRULI", "IDEA", 
-    "IDFC", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "INDIACEM", "INDIAMART", "INDIGO", 
-    "INDUSINDBK", "INDUSTOWER", "INFY", "IOC", "IPCALAB", "IRCTC", "ITC", "JINDALSTEL", 
-    "JKCEMENT", "JSWSTEEL", "JUBLFOOD", "KALYANKJIL", "KOTAKBANK", "LALPATHLAB", "LAURUSLABS", 
-    "LICHSGFIN", "LT", "LTIM", "LTTS", "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO", 
-    "MARUTI", "MCDOWELL-N", "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON", "MPHASIS", 
-    "MRF", "MUTHOOTFIN", "NATIONALUM", "NAUKRI", "NAVINFLUOR", "NESTLEIND", "NMDC", "NTPC", 
-    "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PEL", "PERSISTENT", "PETRONET", "PFC", 
-    "PIDILITIND", "PIIND", "PNB", "POLYCAB", "POWERGRID", "PVRINOX", "RAMCOCEM", "RBLBANK", 
-    "RECLTD", "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SIEMENS", 
-    "SONACOMS", "SRF", "SUNPHARMA", "SUNTV", "SYNGENE", "TATACHEM", "TATACOMM", "TATACONSUM", 
-    "TATAMOTORS", "TATAPOWER", "TATASTEEL", "TCS", "TECHM", "TITAN", "TORNTPHARM", "TORNTPOWER", 
-    "TRENT", "TVSMOTOR", "UBL", "ULTRACEMCO", "UPL", "VEDL", "VOLTAS", "WIPRO", "ZYDUSLIFE"
-]
-
-# ================= 2. DYNAMIC UNIVERSE LOADER =================
-@st.cache_data(ttl=86400)
-def load_dynamic_universe():
+# Load Stock Universe
+@st.cache_data
+def load_stock_list():
     try:
-        url = "https://raw.githubusercontent.com/bollepallirajuNaga/dhan-915-scanner/main/fno_stocks.txt"
-        res = requests.get(url, timeout=2)
-        if res.status_code == 200:
-            lines = [line.strip().upper() for line in res.text.splitlines() if line.strip()]
-            if len(lines) >= 50:
-                return lines
+        with open("fno_stocks.txt", "r") as f:
+            stocks = [line.strip().upper() for line in f if line.strip()]
+        return stocks
+    except Exception:
+        # Fallback default NIFTY 50 list
+        return [
+            "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
+            "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BPCL", "BHARTIARTL",
+            "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT",
+            "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO",
+            "HINDALCO", "HINDUNILVR", "ICICIBANK", "INDUSINDBK", "INFY",
+            "ITC", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM",
+            "M&M", "MARUTI", "NESTLEIND", "NTPC", "ONGC",
+            "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN",
+            "SUNPHARMA", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TCS",
+            "TECHM", "TITAN", "ULTRACEMCO", "WIPRO", "BEL"
+        ]
+
+stock_universe = load_stock_list()
+
+# --- FAST SCANNER CORE ---
+def fetch_stock_data(symbol):
+    try:
+        ticker = yf.Ticker(f"{symbol}.NS")
+        fast_info = ticker.fast_info
+        ltp = round(fast_info.last_price, 2)
+        prev_close = round(fast_info.previous_close, 2)
+        
+        if prev_close and prev_close > 0:
+            p_change = round(((ltp - prev_close) / prev_close) * 100, 4)
+            return {"symbol": symbol, "ltp": ltp, "prev_close": prev_close, "p_change": p_change}
     except Exception:
         pass
-    return DEFAULT_FNO_SYMBOLS
+    return None
 
-FNO_SYMBOLS = load_dynamic_universe()
-YF_TICKERS = [f"{sym}.NS" for sym in FNO_SYMBOLS]
-
-# ================= 3. USER INTERFACE =================
-st.markdown("---")
-st.success(f"🟢 **System Ready:** {len(FNO_SYMBOLS)} NSE F&O Stocks loaded.")
-
-start_btn = st.button("🚀 Start 9:15 Scanner Now", use_container_width=True, type="primary")
-
-if start_btn:
-    status_box = st.empty()
-    progress_bar = st.progress(0)
-    
-    # Precision 09:15:35 AM IST Wait Window
-    while True:
-        now_ist = datetime.now(IST)
-        if now_ist.hour == 9 and now_ist.minute == 15 and now_ist.second >= 35:
-            break
-        elif now_ist.hour > 9 or (now_ist.hour == 9 and now_ist.minute > 15):
-            break
-            
-        current_time_str = now_ist.strftime("%H:%M:%S")
-        status_box.warning(f"🕒 Current Time: **{current_time_str}** | Waiting for **09:15:35 AM**...")
-        time.sleep(0.3)
-        
-    progress_bar.progress(30)
-    status_box.info(f"⚡ Scanning all {len(FNO_SYMBOLS)} F&O stocks in parallel...")
-    
+def run_scanner():
     start_time = time.time()
+    results = []
+    
+    with ThreadPoolExecutor(max_workers=15) as executor:
+        futures = [executor.submit(fetch_stock_data, sym) for sym in stock_universe]
+        for f in futures:
+            res = f.result()
+            if res is not None:
+                results.append(res)
+                
+    elapsed = round(time.time() - start_time, 2)
+    df = pd.DataFrame(results)
+    
+    if df.empty:
+        return None, df, elapsed
+    
+    # Sort descending by % Change
+    df = df.sort_values(by="p_change", ascending=False).reset_index(drop=True)
+    top_stock = df.iloc[0]
+    return top_stock, df, elapsed
+
+def send_to_tradetron(symbol, auth_token):
+    if not auth_token:
+        st.error("⚠️ Tradetron Auth Token is missing in the sidebar!")
+        return None
+        
+    url = f"https://api.tradetron.tech/api?auth-token={auth_token}&key=api_buy&value=1&symbol={symbol}"
     try:
-        df_all = yf.download(tickers=YF_TICKERS, period="5d", interval="1d", progress=False)
-        
-        market_data = []
-        close_prices = df_all["Close"]
-        
-        for sym in FNO_SYMBOLS:
-            ticker = f"{sym}.NS"
-            try:
-                if ticker in close_prices.columns:
-                    s = close_prices[ticker].dropna()
-                    if len(s) >= 2:
-                        prev_close = float(s.iloc[-2])
-                        ltp = float(s.iloc[-1])
-                        
-                        if prev_close > 0 and ltp > 50:
-                            p_change = ((ltp - prev_close) / prev_close) * 100
-                            market_data.append({
-                                "symbol": sym,
-                                "ltp": ltp,
-                                "prev_close": prev_close,
-                                "p_change": p_change
-                            })
-            except Exception:
-                continue
-
-        scan_duration = time.time() - start_time
-        progress_bar.progress(80)
-
-        if not market_data:
-            st.error("❌ Market data fetch returned empty. Please click Start again.")
-        else:
-            df_res = pd.DataFrame(market_data).sort_values(by="p_change", ascending=False).reset_index(drop=True)
-            top_stock = df_res.iloc[0]["symbol"]
-            top_change = df_res.iloc[0]["p_change"]
-            top_ltp = df_res.iloc[0]["ltp"]
-            top_prev = df_res.iloc[0]["prev_close"]
-            
-            progress_bar.progress(90)
-            st.success(
-                f"🎯 **#1 TOP GAINER:** `{top_stock}` | "
-                f"LTP: ₹{top_ltp:.2f} | Prev Close: ₹{top_prev:.2f} | "
-                f"Gain: **+{top_change:.2f}%** (Processed {len(market_data)} stocks in {scan_duration:.2f}s)"
-            )
-            
-            with st.expander("📊 View Live Top 5 Gainers Table"):
-                st.dataframe(df_res.head(8)[["symbol", "ltp", "prev_close", "p_change"]], use_container_width=True)
-
-            # Webhook Post
-            webhook_payload = {
-                "auth-token": TT_AUTH_TOKEN,
-                "key": "api_buy",
-                "value": "1",
-                "symbol": top_stock
-            }
-            webhook_url_full = f"{TT_WEBHOOK_URL}?auth-token={TT_AUTH_TOKEN}&key=api_buy&value=1&symbol={top_stock}"
-            res = requests.post(webhook_url_full, json=webhook_payload, timeout=8)
-            
-            progress_bar.progress(100)
-            st.balloons()
-            st.success(f"✅ **Signal Sent to Tradetron!** (Response: {res.status_code})")
-            st.info(f"🚀 Cloud strategy activated for **{top_stock}**.")
-            
+        response = requests.post(url, timeout=5)
+        return response.status_code
     except Exception as e:
-        st.error(f"Error during scan: {e}")
+        st.error(f"Webhook Failed: {e}")
+        return None
+
+# --- UI CONTROLS ---
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("⚡ Manual Scanner")
+    if st.button("🚀 Run Scanner Instantly", use_container_width=True):
+        with st.spinner("Scanning NIFTY 50 Universe..."):
+            top_stock, df, elapsed = run_scanner()
+            
+            if top_stock is not None:
+                st.success(
+                    f"🎯 **#1 TOP GAINER:** {top_stock['symbol']} | "
+                    f"LTP: ₹{top_stock['ltp']} | Prev Close: ₹{top_stock['prev_close']} | "
+                    f"Gain: +{top_stock['p_change']}% (Processed {len(df)} stocks in {elapsed}s)"
+                )
+                
+                with st.expander("📊 View Live Top 5 Gainers Table", expanded=True):
+                    st.dataframe(df.head(8), use_container_width=True)
+                
+                # Send Webhook
+                status = send_to_tradetron(top_stock['symbol'], tradetron_auth_token)
+                if status == 200:
+                    st.success("✅ Signal Sent to Tradetron! (Response: 200)")
+                else:
+                    st.warning(f"Webhook returned status: {status}")
+
+with col2:
+    st.subheader("⏰ Auto-Pilot Mode (09:15:35 AM)")
+    arm_auto = st.button("🛡️ Arm Auto-Pilot Schedule", use_container_width=True)
+    
+    if arm_auto:
+        status_box = st.empty()
+        status_box.info("⏳ Auto-Pilot is ARMED! Monitoring IST time for 09:15:35 AM...")
+        
+        while True:
+            now_ist = datetime.datetime.now(IST)
+            current_time_str = now_ist.strftime("%H:%M:%S")
+            
+            # Check if 09:15:35 reached
+            if now_ist.hour == 9 and now_ist.minute == 15 and now_ist.second >= 35:
+                status_box.success(f"🚀 Trigger Time reached ({current_time_str})! Running Scanner...")
+                top_stock, df, elapsed = run_scanner()
+                
+                if top_stock is not None:
+                    st.success(
+                        f"🎯 **#1 TOP GAINER:** {top_stock['symbol']} | "
+                        f"Gain: +{top_stock['p_change']}% (Scanned in {elapsed}s)"
+                    )
+                    status = send_to_tradetron(top_stock['symbol'], tradetron_auth_token)
+                    if status == 200:
+                        st.success("✅ Signal Sent to Tradetron! (Response: 200)")
+                break
+            
+            status_box.markdown(f"**Current IST:** `{current_time_str}` | Target: `09:15:35`")
+            time.sleep(1)
