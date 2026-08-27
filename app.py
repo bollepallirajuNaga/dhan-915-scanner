@@ -13,9 +13,9 @@ st.title("⚡ 9:15 F&O Top Gainer Scanner")
 st.caption("Auto Scanner & Tradetron Webhook Trigger")
 
 # ================= CONFIGURATION =================
-CLIENT_ID = "YOUR_DHAN_CLIENT_ID"            # మీ ధన్ క్లయింట్ ఐడీ
-TT_WEBHOOK_URL = "YOUR_TRADETRON_WEBHOOK_URL" # ట్రేడ్‌ట్రాన్ వెబ్‌హుక్ URL
-TT_AUTH_TOKEN = "YOUR_TT_AUTH_TOKEN"          # ట్రేడ్‌ట్రాన్ ఆథ్ టోకెన్
+CLIENT_ID = "1113235897"            # మీ ధన్ క్లయింట్ ఐడీ
+TT_WEBHOOK_URL = "https://api.tradetron.tech/api" # ట్రేడ్‌ట్రాన్ వెబ్‌హుక్ URL
+TT_AUTH_TOKEN = "41cd0696-63ed-43da-8145-a2357d2c8cdb"          # ట్రేడ్‌ట్రాన్ ఆథ్ టోకెన్
 
 FO_STOCKS = [
     "RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "KOTAKBANK", "LT", "SBIN",
@@ -90,7 +90,7 @@ if start_btn:
             # 4. Tradetron Webhook కు పోస్ట్ చేయడం
             payload = {
                 "auth-token": TT_AUTH_TOKEN,
-                "key": "entry",
+                "key": "api_buy",
                 "value": "1",
                 "symbol": top_stock
             }
