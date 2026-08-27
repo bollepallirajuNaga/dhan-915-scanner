@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import yfinance as yf
 
-# 1. Page Configuration (Instant UI Loading)
+# 1. Page Configuration
 st.set_page_config(
     page_title="9:15 F&O Universal Scanner",
     page_icon="⚡",
@@ -14,14 +14,14 @@ st.set_page_config(
 )
 
 st.title("⚡ 9:15 F&O Top Gainer Scanner")
-st.caption("Hybrid High-Speed Engine • Future-Proof Dynamic F&O Universe • Tradetron Cloud")
+st.caption("100% Complete Universe Engine • Tradetron Cloud")
 
 # ================= CONFIGURATION =================
 TT_WEBHOOK_URL = "https://api.tradetron.tech/api"
 TT_AUTH_TOKEN = "41cd0696-63ed-43da-8145-a2357d2c8cdb"
 IST = pytz.timezone("Asia/Kolkata")
 
-# 190+ పూర్తి బేస్‌లైన్ F&O స్టాక్స్ (ఇటీవల చేరిన కొత్త స్టాక్స్‌తో సహా)
+# 190+ Base Universe
 DEFAULT_FNO_SYMBOLS = [
     "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT", "ADANIPORTS", 
     "ADANIPOWER", "ALKEM", "AMBER", "AMBUJACEM", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY", 
@@ -52,7 +52,6 @@ DEFAULT_FNO_SYMBOLS = [
 # ================= 2. DYNAMIC UNIVERSE LOADER =================
 @st.cache_data(ttl=86400)
 def load_dynamic_universe():
-    """మీ GitHub రెపోలోని fno_stocks.txt నుండి లైవ్‌గా లోడ్ చేస్తుంది (ఫెయిల్ అయితే డీఫాల్ట్ లిస్ట్ వాడుతుంది)"""
     try:
         url = "https://raw.githubusercontent.com/bollepallirajuNaga/dhan-915-scanner/main/fno_stocks.txt"
         res = requests.get(url, timeout=2)
@@ -69,7 +68,7 @@ YF_TICKERS = [f"{sym}.NS" for sym in FNO_SYMBOLS]
 
 # ================= 3. USER INTERFACE =================
 st.markdown("---")
-st.success(f"🟢 **System Ready:** {len(FNO_SYMBOLS)} NSE F&O Stocks Active (Zero-Latency Mode).")
+st.success(f"🟢 **System Ready:** {len(FNO_SYMBOLS)} NSE F&O Stocks loaded.")
 
 start_btn = st.button("🚀 Start 9:15 Scanner Now", use_container_width=True, type="primary")
 
@@ -77,13 +76,12 @@ if start_btn:
     status_box = st.empty()
     progress_bar = st.progress(0)
     
-    # 09:15:35 AM IST Precision Wait Window
+    # Precision 09:15:35 AM IST Wait Window
     while True:
         now_ist = datetime.now(IST)
         if now_ist.hour == 9 and now_ist.minute == 15 and now_ist.second >= 35:
             break
         elif now_ist.hour > 9 or (now_ist.hour == 9 and now_ist.minute > 15):
-            # 09:16 దాటిన తర్వాత టెస్ట్ చేస్తే వెయిట్ చేయకుండా వెంటనే స్కాన్ అవుతుంది
             break
             
         current_time_str = now_ist.strftime("%H:%M:%S")
@@ -91,34 +89,32 @@ if start_btn:
         time.sleep(0.3)
         
     progress_bar.progress(30)
-    status_box.info(f"⚡ Fast-scanning all {len(FNO_SYMBOLS)} F&O stocks in parallel...")
+    status_box.info(f"⚡ Scanning all {len(FNO_SYMBOLS)} F&O stocks in parallel...")
     
     start_time = time.time()
     try:
-        data = yf.download(tickers=YF_TICKERS, period="2d", interval="1d", group_by="ticker", progress=False, threads=True)
+        df_all = yf.download(tickers=YF_TICKERS, period="5d", interval="1d", progress=False)
         
         market_data = []
+        close_prices = df_all["Close"]
+        
         for sym in FNO_SYMBOLS:
             ticker = f"{sym}.NS"
             try:
-                df_sym = data[ticker]
-                if len(df_sym) >= 2:
-                    prev_close = float(df_sym["Close"].iloc[-2])
-                    ltp = float(df_sym["Close"].iloc[-1])
-                elif len(df_sym) == 1:
-                    prev_close = float(df_sym["Open"].iloc[0])
-                    ltp = float(df_sym["Close"].iloc[0])
-                else:
-                    continue
-                    
-                if prev_close > 0 and ltp > 50:
-                    p_change = ((ltp - prev_close) / prev_close) * 100
-                    market_data.append({
-                        "symbol": sym,
-                        "ltp": ltp,
-                        "prev_close": prev_close,
-                        "p_change": p_change
-                    })
+                if ticker in close_prices.columns:
+                    s = close_prices[ticker].dropna()
+                    if len(s) >= 2:
+                        prev_close = float(s.iloc[-2])
+                        ltp = float(s.iloc[-1])
+                        
+                        if prev_close > 0 and ltp > 50:
+                            p_change = ((ltp - prev_close) / prev_close) * 100
+                            market_data.append({
+                                "symbol": sym,
+                                "ltp": ltp,
+                                "prev_close": prev_close,
+                                "p_change": p_change
+                            })
             except Exception:
                 continue
 
@@ -128,7 +124,6 @@ if start_btn:
         if not market_data:
             st.error("❌ Market data fetch returned empty. Please click Start again.")
         else:
-            # Sorting & Absolute #1 Selection
             df_res = pd.DataFrame(market_data).sort_values(by="p_change", ascending=False).reset_index(drop=True)
             top_stock = df_res.iloc[0]["symbol"]
             top_change = df_res.iloc[0]["p_change"]
@@ -143,9 +138,9 @@ if start_btn:
             )
             
             with st.expander("📊 View Live Top 5 Gainers Table"):
-                st.dataframe(df_res.head(5)[["symbol", "ltp", "prev_close", "p_change"]], use_container_width=True)
+                st.dataframe(df_res.head(8)[["symbol", "ltp", "prev_close", "p_change"]], use_container_width=True)
 
-            # Webhook Post to Tradetron
+            # Webhook Post
             webhook_payload = {
                 "auth-token": TT_AUTH_TOKEN,
                 "key": "api_buy",
