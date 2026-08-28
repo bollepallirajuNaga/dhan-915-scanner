@@ -1,159 +1,525 @@
-import streamlit as st
+import datetime
+import os
 import time
-from datetime import datetime
-import pytz
-import requests
+import numpy as np
 import pandas as pd
+import streamlit as st
 import yfinance as yf
 
-# 1. Page Configuration
+# ==========================================
+# 1. కాన్ఫిగరేషన్ & పెరామీటర్స్
+# ==========================================
 st.set_page_config(
-    page_title="9:15 NIFTY 50 Scanner",
-    page_icon="⚡",
-    layout="wide"
+    page_title="F&O Momentum Scalper", layout="wide", page_icon="⚡"
 )
 
-st.title("⚡ 9:15 Top Gainer Scanner & Tradetron Bridge")
-st.caption("Tradetron Cloud Execution • NIFTY 50 Universe")
+VIRTUAL_CAPITAL = 125000.0
+TARGET_PERCENT = 1.0
+SL_PERCENT = 0.5
+SCAN_START_TIME = datetime.time(9, 15, 30)
+ENTRY_END_TIME = datetime.time(9, 25, 0)
+HARD_EXIT_TIME = datetime.time(9, 35, 0)
+LOG_FILE = "trade_history.csv"
 
-# ================= CONFIGURATION =================
-TT_WEBHOOK_URL = "https://api.tradetron.tech/api"
-TT_AUTH_TOKEN = "41cd0696-63ed-43da-8145-a2357d2c8cdb"
-IST = pytz.timezone("Asia/Kolkata")
-
-# NIFTY 50 Default Base Universe
-DEFAULT_FNO_SYMBOLS = [
-    "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", 
-    "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BPCL", "BHARTIARTL", 
-    "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", 
-    "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", 
-    "HINDALCO", "HINDUNILVR", "ICICIBANK", "INDUSINDBK", "INFY", 
-    "ITC", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", 
-    "M&M", "MARUTI", "NESTLEIND", "NTPC", "ONGC", 
-    "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", 
-    "SUNPHARMA", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TCS", 
-    "TECHM", "TITAN", "ULTRACEMCO", "WIPRO", "BEL"
+# 185 NSE F&O స్టాక్స్ లిస్ట్
+FO_STOCKS = [
+    "AARTIIND.NS",
+    "ABB.NS",
+    "ABBOTINDIA.NS",
+    "ABCAPITAL.NS",
+    "ABFRL.NS",
+    "ACC.NS",
+    "ADANIENT.NS",
+    "ADANIPORTS.NS",
+    "ALKEM.NS",
+    "AMBUJACEM.NS",
+    "APOLLOHOSP.NS",
+    "APOLLOTYRE.NS",
+    "ASHOKLEY.NS",
+    "ASIANPAINT.NS",
+    "ASTRAL.NS",
+    "ATUL.NS",
+    "AUBANK.NS",
+    "AUROPHARMA.NS",
+    "AXISBANK.NS",
+    "BAJAJ-AUTO.NS",
+    "BAJAJFINSV.NS",
+    "BAJFINANCE.NS",
+    "BALKRISIND.NS",
+    "BALRAMCHIN.NS",
+    "BANDHANBNK.NS",
+    "BANKBARODA.NS",
+    "BATAINDIA.NS",
+    "BEL.NS",
+    "BERGEPAINT.NS",
+    "BHARATFORG.NS",
+    "BHARTIARTL.NS",
+    "BHEL.NS",
+    "BIOCON.NS",
+    "BOSCHLTD.NS",
+    "BPCL.NS",
+    "BRITANNIA.NS",
+    "BSOFT.NS",
+    "CANBK.NS",
+    "CANFINHOME.NS",
+    "CHAMBLFERT.NS",
+    "CHOLAFIN.NS",
+    "CIPLA.NS",
+    "COALINDIA.NS",
+    "COFORGE.NS",
+    "COLPAL.NS",
+    "CONCOR.NS",
+    "COROMANDEL.NS",
+    "CROMPTON.NS",
+    "CUB.NS",
+    "CUMMINSIND.NS",
+    "DABUR.NS",
+    "DALBHARAT.NS",
+    "DEEPAKNTR.NS",
+    "DELHIVERY.NS",
+    "DIVISLAB.NS",
+    "DIXON.NS",
+    "DLF.NS",
+    "DRREDDY.NS",
+    "EICHERMOT.NS",
+    "ESCORTS.NS",
+    "EXIDEIND.NS",
+    "FEDERALBNK.NS",
+    "GAIL.NS",
+    "GLENMARK.NS",
+    "GMRINFRA.NS",
+    "GNFC.NS",
+    "GODREJCP.NS",
+    "GODREJPROP.NS",
+    "GRANULES.NS",
+    "GRASIM.NS",
+    "GUJGASLTD.NS",
+    "HAL.NS",
+    "HAVELLS.NS",
+    "HCLTECH.NS",
+    "HDFCAMC.NS",
+    "HDFCBANK.NS",
+    "HDFCLIFE.NS",
+    "HEROMOTOCO.NS",
+    "HINDALCO.NS",
+    "HINDCOPPER.NS",
+    "HINDPETRO.NS",
+    "HINDUNILVR.NS",
+    "ICICIBANK.NS",
+    "ICICIGI.NS",
+    "ICICIPRULI.NS",
+    "IDEA.NS",
+    "IDFCFIRSTB.NS",
+    "IEX.NS",
+    "IGL.NS",
+    "INDHOTEL.NS",
+    "INDIACEM.NS",
+    "INDIAMART.NS",
+    "INDIGO.NS",
+    "INDUSINDBK.NS",
+    "INDUSTOWER.NS",
+    "INFY.NS",
+    "IOC.NS",
+    "IPCALAB.NS",
+    "IRCTC.NS",
+    "ITC.NS",
+    "JINDALSTEL.NS",
+    "JKCEMENT.NS",
+    "JSWSTEEL.NS",
+    "JUBLFOOD.NS",
+    "KOTAKBANK.NS",
+    "LALPATHLAB.NS",
+    "LAURUSLABS.NS",
+    "LICHSGFIN.NS",
+    "LTIM.NS",
+    "LT.NS",
+    "LTTS.NS",
+    "LUPIN.NS",
+    "M&MFIN.NS",
+    "M&M.NS",
+    "MANAPPURAM.NS",
+    "MARICO.NS",
+    "MARUTI.NS",
+    "MCX.NS",
+    "METROPOLIS.NS",
+    "MFSL.NS",
+    "MGL.NS",
+    "MOTHERSON.NS",
+    "MPHASIS.NS",
+    "MRF.NS",
+    "MUTHOOTFIN.NS",
+    "NATIONALUM.NS",
+    "NAUKRI.NS",
+    "NAVINFLUOR.NS",
+    "NESTLEIND.NS",
+    "NMDC.NS",
+    "NTPC.NS",
+    "OBEROIRLTY.NS",
+    "OFSS.NS",
+    "ONGC.NS",
+    "PAGEIND.NS",
+    "PEL.NS",
+    "PERSISTENT.NS",
+    "PETRONET.NS",
+    "PFC.NS",
+    "PIDILITIND.NS",
+    "PIIND.NS",
+    "PNB.NS",
+    "POLYCAB.NS",
+    "POWERGRID.NS",
+    "PVRINOX.NS",
+    "RAMCOCEM.NS",
+    "RBLBANK.NS",
+    "RECLTD.NS",
+    "RELIANCE.NS",
+    "SAIL.NS",
+    "SBICARD.NS",
+    "SBILIFE.NS",
+    "SBIN.NS",
+    "SHREECEM.NS",
+    "SIEMENS.NS",
+    "SRF.NS",
+    "SUNPHARMA.NS",
+    "SUNTV.NS",
+    "SYNGENE.NS",
+    "TATACHEM.NS",
+    "TATACOMM.NS",
+    "TATACONSUM.NS",
+    "TATAMOTORS.NS",
+    "TATAPOWER.NS",
+    "TATASTEEL.NS",
+    "TCS.NS",
+    "TECHM.NS",
+    "TITAN.NS",
+    "TORNTPHARM.NS",
+    "TORNTPOWER.NS",
+    "TRENT.NS",
+    "TVSMOTOR.NS",
+    "UBL.NS",
+    "ULTRACEMCO.NS",
+    "UPL.NS",
+    "VEDL.NS",
+    "VOLTAS.NS",
+    "WIPRO.NS",
+    "ZEEL.NS",
+    "ZYDUSLIFE.NS",
 ]
 
-# ================= 2. DYNAMIC UNIVERSE LOADER =================
-@st.cache_data(ttl=86400)
-def load_dynamic_universe():
-    try:
-        url = "https://raw.githubusercontent.com/bollepallirajuNaga/dhan-915-scanner/main/fno_stocks.txt"
-        res = requests.get(url, timeout=2)
-        if res.status_code == 200:
-            lines = [line.strip().upper() for line in res.text.splitlines() if line.strip()]
-            if len(lines) >= 40:
-                return lines
-    except Exception:
-        pass
-    return DEFAULT_FNO_SYMBOLS
 
-FNO_SYMBOLS = load_dynamic_universe()
-YF_TICKERS = [f"{sym}.NS" for sym in FNO_SYMBOLS]
+# ==========================================
+# 2. టెక్నికల్ ఇండికేటర్స్ & సేవింగ్ ఫంక్షన్
+# ==========================================
+def calculate_indicators(df):
+    if len(df) == 0:
+        return df
+    df["EMA_9"] = df["Close"].ewm(span=9, adjust=False).mean()
+    typical_price = (df["High"] + df["Low"] + df["Close"]) / 3.0
+    cum_vol = df["Volume"].cumsum()
+    cum_vp = (typical_price * df["Volume"]).cumsum()
+    df["VWAP"] = np.where(cum_vol > 0, cum_vp / cum_vol, df["Close"])
+    return df
 
-# ================= 3. SCANNER ENGINE FUNCTION =================
-def execute_scan_and_webhook():
-    status_box = st.empty()
-    progress_bar = st.progress(30)
-    status_box.info(f"⚡ Scanning all {len(FNO_SYMBOLS)} stocks in parallel...")
-    
-    start_time = time.time()
+
+def save_trade_record(record):
+    """Saves completed trade details into CSV file"""
+    df_new = pd.DataFrame([record])
+    if not os.path.exists(LOG_FILE):
+        df_new.to_csv(LOG_FILE, index=False)
+    else:
+        df_new.to_csv(LOG_FILE, mode="a", header=False, index=False)
+
+
+# ==========================================
+# 3. స్కానర్ ఇంజిన్
+# ==========================================
+def scan_top_gainer(universe, dry_run=False):
+    if dry_run:
+        return {
+            "symbol": "MANAPPURAM.NS",
+            "name": "MANAPPURAM",
+            "open": 180.0,
+            "ltp": 184.5,
+            "change_pct": 2.50,
+        }
+
     try:
-        df_all = yf.download(tickers=YF_TICKERS, period="5d", interval="1d", progress=False)
-        market_data = []
-        close_prices = df_all["Close"]
-        
-        for sym in FNO_SYMBOLS:
-            ticker = f"{sym}.NS"
+        tickers_str = " ".join(universe)
+        data = yf.download(
+            tickers_str,
+            period="1d",
+            interval="1m",
+            progress=False,
+            timeout=10,
+            threads=True,
+        )
+        gainers = []
+        for sym in universe:
             try:
-                if ticker in close_prices.columns:
-                    s = close_prices[ticker].dropna()
-                    if len(s) >= 2:
-                        prev_close = float(s.iloc[-2])
-                        ltp = float(s.iloc[-1])
-                        
-                        if prev_close > 0 and ltp > 50:
-                            p_change = ((ltp - prev_close) / prev_close) * 100
-                            market_data.append({
-                                "symbol": sym,
-                                "ltp": ltp,
-                                "prev_close": prev_close,
-                                "p_change": p_change
-                            })
+                if isinstance(data.columns, pd.MultiIndex):
+                    sub = data.xs(sym, level=1, axis=1).dropna()
+                else:
+                    sub = data.dropna()
+
+                if len(sub) >= 1:
+                    open_p = float(sub["Open"].iloc[0])
+                    ltp = float(sub["Close"].iloc[-1])
+                    if open_p > 50:
+                        pct = ((ltp - open_p) / open_p) * 100.0
+                        if 0 < pct <= 4.0:
+                            gainers.append(
+                                {
+                                    "symbol": sym,
+                                    "name": sym.replace(".NS", ""),
+                                    "open": open_p,
+                                    "ltp": ltp,
+                                    "change_pct": pct,
+                                }
+                            )
             except Exception:
                 continue
 
-        scan_duration = time.time() - start_time
-        progress_bar.progress(80)
-
-        if not market_data:
-            st.error("❌ Market data fetch returned empty. Please try again.")
-        else:
-            df_res = pd.DataFrame(market_data).sort_values(by="p_change", ascending=False).reset_index(drop=True)
-            top_stock = df_res.iloc[0]["symbol"]
-            top_change = df_res.iloc[0]["p_change"]
-            top_ltp = df_res.iloc[0]["ltp"]
-            top_prev = df_res.iloc[0]["prev_close"]
-            
-            progress_bar.progress(90)
-            st.success(
-                f"🎯 **#1 TOP GAINER:** `{top_stock}` | "
-                f"LTP: ₹{top_ltp:.2f} | Prev Close: ₹{top_prev:.2f} | "
-                f"Gain: **+{top_change:.2f}%** (Processed {len(market_data)} stocks in {scan_duration:.2f}s)"
-            )
-            
-            with st.expander("📊 View Live Top 5 Gainers Table", expanded=True):
-                st.dataframe(df_res.head(8)[["symbol", "ltp", "prev_close", "p_change"]], use_container_width=True)
-
-            # Webhook Post to Tradetron
-            webhook_payload = {
-                "auth-token": TT_AUTH_TOKEN,
-                "key": "api_buy",
-                "value": "1",
-                "symbol": top_stock
-            }
-            webhook_url_full = f"{TT_WEBHOOK_URL}?auth-token={TT_AUTH_TOKEN}&key=api_buy&value=1&symbol={top_stock}"
-            res = requests.post(webhook_url_full, json=webhook_payload, timeout=8)
-            
-            progress_bar.progress(100)
-            st.balloons()
-            st.success(f"✅ **Signal Sent to Tradetron!** (Response: {res.status_code})")
-            st.info(f"🚀 Cloud strategy activated for **{top_stock}**.")
-            
+        if gainers:
+            gainers.sort(key=lambda x: x["change_pct"], reverse=True)
+            return gainers[0]
     except Exception as e:
-        st.error(f"Error during scan: {e}")
+        st.warning(f"Scanner warning: {e}")
+    return None
 
-# ================= 4. USER INTERFACE (DUAL BUTTONS) =================
-st.markdown("---")
-st.success(f"🟢 **System Ready:** {len(FNO_SYMBOLS)} NIFTY 50 Stocks loaded.")
 
-col1, col2 = st.columns(2)
+# ==========================================
+# 4. STREAMLIT DASHBOARD
+# ==========================================
+st.title("⚡ F&O Intraday Scalper (09:15 - 09:35)")
+st.caption("Pure Python Standalone Paper Trading Engine | Auto-Excel Logging")
 
-with col1:
-    st.subheader("⚡ Instant Test")
-    if st.button("🚀 Run Instant Scan (No Wait)", use_container_width=True):
-        execute_scan_and_webhook()
+# Controls
+st.sidebar.header("🕹️ కంట్రోల్ ప్యానెల్")
+dry_run = st.sidebar.checkbox(
+    "🧪 Dry Run / Simulation Mode (వీకెండ్ టెస్టింగ్)", value=True
+)
+start_btn = st.sidebar.button("🚀 Start Engine")
 
-with col2:
-    st.subheader("⏰ Auto-Pilot (9:10 - 9:15 AM)")
-    arm_btn = st.button("🛡️ Arm Auto-Pilot Schedule", use_container_width=True, type="primary")
-    
-    if arm_btn:
-        status_box = st.empty()
-        
-        while True:
-            now_ist = datetime.now(IST)
-            current_time_str = now_ist.strftime("%H:%M:%S")
-            
-            if now_ist.hour == 9 and now_ist.minute == 15 and now_ist.second >= 35:
-                status_box.success(f"🚀 Trigger Time reached ({current_time_str})! Running Scanner...")
-                execute_scan_and_webhook()
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Capital", f"₹{VIRTUAL_CAPITAL:,.2f}")
+col2.metric("Window", "09:15 - 09:35 AM")
+col3.metric("Target / SL", f"+{TARGET_PERCENT}% / -{SL_PERCENT}%")
+col4.metric("Mode", "SIMULATION" if dry_run else "LIVE PAPER")
+
+status_box = st.empty()
+data_table_box = st.empty()
+log_box = st.empty()
+
+
+# ==========================================
+# 5. EXECUTION & LOGGING LOOP
+# ==========================================
+def run_strategy():
+    logs = []
+
+    def log(msg):
+        logs.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}"
+        )
+        log_box.text_area("📜 సిస్టమ్ లాగ్స్", "\n".join(logs), height=220)
+
+    log(
+        "ఇంజిన్ ప్రారంభమైంది..."
+        if not dry_run
+        else "డ్రై-రన్ సిమ్యులేషన్ రన్ అవుతోంది."
+    )
+
+    selected_stock = None
+    state = "SCANNING"
+    position = None
+
+    mock_ltp = 184.5
+    mock_high_1m = 185.0
+
+    while True:
+        now = datetime.datetime.now().time()
+        today_date = datetime.date.today().strftime("%Y-%m-%d")
+
+        # స్టేజ్ 1: స్కానింగ్
+        if state == "SCANNING":
+            status_box.info("🔍 185 F&O స్టాక్స్‌ను స్కాన్ చేస్తున్నాం...")
+            selected_stock = scan_top_gainer(FO_STOCKS, dry_run=dry_run)
+
+            if selected_stock:
+                sym_name = selected_stock["name"]
+                gain = selected_stock["change_pct"]
+                log(f"🎯 టాప్ గెయినర్ ఎంపికైంది: {sym_name} (+{gain:.2f}%)")
+                state = "MONITORING"
+            else:
+                time.sleep(3)
+                continue
+
+        # స్టేజ్ 2: కండిషన్ మానిటరింగ్
+        elif state == "MONITORING":
+            if not dry_run and now > ENTRY_END_TIME:
+                status_box.warning(
+                    "⏰ 09:25 AM కటాఫ్ దాటింది. ఎలాంటి బ్రేకౌట్ రాలేదు (No Trade Day)."
+                )
+                log("09:25 AM Cut-off reached. Strategy Stopped.")
                 break
-            elif now_ist.hour > 9 or (now_ist.hour == 9 and now_ist.minute > 15):
-                status_box.info("Market already past 09:15:35 AM. Running scanner now...")
-                execute_scan_and_webhook()
+
+            sym = selected_stock["symbol"]
+            status_box.info(
+                f"👀 మానిటరింగ్ {selected_stock['name']}: 1-Min High, 9 EMA & VWAP చెక్ చేస్తున్నాం..."
+            )
+
+            if not dry_run:
+                try:
+                    df = yf.download(
+                        sym, period="1d", interval="1m", progress=False
+                    )
+                    df = calculate_indicators(df)
+                    if len(df) < 2:
+                        time.sleep(3)
+                        continue
+                    first_min_high = df["High"].iloc[0]
+                    cur_ltp = df["Close"].iloc[-1]
+                    cur_ema = df["EMA_9"].iloc[-1]
+                    cur_vwap = df["VWAP"].iloc[-1]
+                except Exception as e:
+                    log(f"డేటా ఎర్రర్: {e}, రీ-కనెక్ట్ చేస్తున్నాం...")
+                    time.sleep(2)
+                    continue
+            else:
+                mock_ltp += 0.30
+                cur_ltp = mock_ltp
+                first_min_high = mock_high_1m
+                cur_ema = 183.0
+                cur_vwap = 182.5
+
+            c1 = cur_ltp > first_min_high
+            c2 = cur_ltp > cur_ema
+            c3 = cur_ltp > cur_vwap
+
+            data_table_box.table(
+                pd.DataFrame(
+                    [
+                        {
+                            "Stock": selected_stock["name"],
+                            "LTP": f"₹{cur_ltp:.2f}",
+                            "1-Min High": f"₹{first_min_high:.2f}",
+                            "9 EMA": f"₹{cur_ema:.2f}",
+                            "VWAP": f"₹{cur_vwap:.2f}",
+                            "1-Min High Break": "✅ YES" if c1 else "❌ NO",
+                            "Above EMA": "✅ YES" if c2 else "❌ NO",
+                            "Above VWAP": "✅ YES" if c3 else "❌ NO",
+                        }
+                    ]
+                )
+            )
+
+            if c1 and c2 and c3:
+                qty = int(VIRTUAL_CAPITAL / cur_ltp)
+                entry_price = cur_ltp
+                target_p = entry_price * (1 + TARGET_PERCENT / 100.0)
+                sl_p = entry_price * (1 - SL_PERCENT / 100.0)
+
+                position = {
+                    "date": today_date,
+                    "stock": selected_stock["name"],
+                    "symbol": sym,
+                    "qty": qty,
+                    "entry_time": datetime.datetime.now().strftime("%H:%M:%S"),
+                    "entry_price": entry_price,
+                    "target": target_p,
+                    "sl": sl_p,
+                }
+                log(
+                    f"🟢 BUY ORDER: {position['stock']} | Qty: {qty} @ ₹{entry_price:.2f}"
+                )
+                state = "IN_POSITION"
+
+            time.sleep(3)
+
+        # స్టేజ్ 3: పొజిషన్ ట్రాకింగ్ & ఎగ్జిట్ (ఎక్సెల్ సేవింగ్)
+        elif state == "IN_POSITION":
+            if not dry_run:
+                try:
+                    df = yf.download(
+                        position["symbol"],
+                        period="1d",
+                        interval="1m",
+                        progress=False,
+                    )
+                    cur_ltp = df["Close"].iloc[-1]
+                except Exception:
+                    time.sleep(2)
+                    continue
+            else:
+                cur_ltp += 0.20
+
+            pnl = (cur_ltp - position["entry_price"]) * position["qty"]
+            pnl_pct = (
+                (cur_ltp - position["entry_price"]) / position["entry_price"]
+            ) * 100.0
+
+            status_box.success(
+                f"🟢 IN TRADE: {position['stock']} | Entry: ₹{position['entry_price']:.2f} | LTP: ₹{cur_ltp:.2f} | P&L: ₹{pnl:,.2f} ({pnl_pct:+.2f}%)"
+            )
+
+            exit_reason = None
+
+            if cur_ltp >= position["target"]:
+                exit_reason = "TARGET_HIT"
+                log(
+                    f"🎉 TARGET HIT! Exit @ ₹{cur_ltp:.2f} | Profit: +₹{pnl:,.2f}"
+                )
+                status_box.balloons()
+            elif cur_ltp <= position["sl"]:
+                exit_reason = "SL_HIT"
+                log(f"🛑 STOP LOSS HIT! Exit @ ₹{cur_ltp:.2f} | Loss: ₹{pnl:,.2f}")
+            elif not dry_run and now >= HARD_EXIT_TIME:
+                exit_reason = "TIME_EXIT_0935"
+                log(
+                    f"⏰ 09:35 AM HARD CUT-OFF! Exit @ ₹{cur_ltp:.2f} | P&L: ₹{pnl:,.2f}"
+                )
+
+            # ట్రేడ్ ముగిసిన వెంటనే ఎక్సెల్ లోకి సేవ్ చేయడం
+            if exit_reason:
+                trade_record = {
+                    "Date": position["date"],
+                    "Stock": position["stock"],
+                    "Qty": position["qty"],
+                    "Entry Time": position["entry_time"],
+                    "Entry Price (₹)": round(position["entry_price"], 2),
+                    "Exit Time": datetime.datetime.now().strftime("%H:%M:%S"),
+                    "Exit Price (₹)": round(cur_ltp, 2),
+                    "Exit Reason": exit_reason,
+                    "Net P&L (₹)": round(pnl, 2),
+                    "P&L (%)": round(pnl_pct, 2),
+                }
+                save_trade_record(trade_record)
+                log("📁 Trade details successfully saved to CSV file!")
                 break
-                
-            status_box.warning(f"🕒 Current IST: **{current_time_str}** | Auto-Trigger at **09:15:35 AM**...")
-            time.sleep(0.5)
+
+            time.sleep(3)
+
+
+if start_btn:
+    run_strategy()
+
+# ==========================================
+# 6. గత ట్రేడ్ల రికార్డ్ & డౌన్‌లోడ్ (TRADE HISTORY)
+# ==========================================
+st.divider()
+st.subheader("📊 ట్రేడ్ హిస్టరీ బుక్ (Daily Trade Log)")
+
+if os.path.exists(LOG_FILE):
+    history_df = pd.read_csv(LOG_FILE)
+    st.dataframe(history_df, use_container_width=True)
+
+    csv_data = history_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Download Complete Trade Book (CSV)",
+        data=csv_data,
+        file_name="FO_Scalping_Trades.csv",
+        mime="text/csv",
+    )
+else:
+    st.info(
+        "ఇంకా ఎలాంటి ట్రేడ్లు రికార్డ్ కాలేదు. మొదటి ట్రేడ్ పూర్తయిన వెంటనే ఇక్కడ కనిపిస్తుంది."
+    )
