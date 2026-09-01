@@ -2,10 +2,20 @@ import datetime
 import os
 import time
 from zoneinfo import ZoneInfo
-from dhanhq import dhanhq
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+# DhanHQ లైబ్రరీని సురక్షితంగా లోడ్ చేసే భాగం
+try:
+    import dhanhq
+
+    if hasattr(dhanhq, "dhanhq"):
+        DhanClientClass = getattr(dhanhq, "dhanhq")
+    else:
+        DhanClientClass = dhanhq
+except Exception as e:
+    DhanClientClass = None
 
 # ==============================================================================
 # 1. పేజ్ సెటప్ & టైమ్ జోన్ కాన్ఫిగరేషన్
@@ -21,9 +31,9 @@ VIRTUAL_CAPITAL = 125000.0  # ₹1,25,000 వర్చువల్ మూలధ�
 TARGET_PERCENT = 1.0  # +1.0% టార్గెట్
 SL_PERCENT = 0.5  # -0.5% స్టాప్‌లాస్
 SLIPPAGE_PCT = 0.05  # 0.05% స్లిప్పేజ్
-EST_CHARGES = 40.0  # ₹40 అంచనా బ్రోకరేజ్/ట్యాక్సులు
+EST_CHARGES = 40.0  # ₹40 అంచనా ఖర్చులు
 
-# స్ట్రాటజీ టైమింగ్స్ (IST)
+# సమయాలు (IST)
 SCAN_TIME = datetime.time(9, 15, 35)  # 09:15:35 AM స్కానింగ్
 ENTRY_CUTOFF_TIME = datetime.time(9, 25, 0)  # 09:25:00 AM ఎంట్రీ కటాఫ్
 HARD_EXIT_TIME = datetime.time(9, 35, 0)  # 09:35:00 AM మాండేటరీ ఎగ్జిట్
@@ -32,11 +42,11 @@ LOG_FILE = "trade_history.csv"
 STOCKS_FILE = "fno_stocks.txt"
 
 # ==============================================================================
-# 2. సైడ్‌బార్ - డైలీ టోకెన్ ఎంట్రీ & కంట్రోల్స్
+# 2. సైడ్‌బార్ - డైలీ లాగిన్
 # ==============================================================================
 st.sidebar.header("🔑 Dhan API లాగిన్")
-DHAN_CLIENT_ID = st.sidebar.text_input("Client ID", value="1113235897")
-DHAN_ACCESS_TOKEN = st.sidebar.text_input(
+dhan_client_input = st.sidebar.text_input("Client ID", value="1113235897")
+dhan_token_input = st.sidebar.text_input(
     "Daily Access Token (24-Hr)",
     type="password",
     help="Dhan పోర్టల్ నుండి తాజా టోకెన్ ఇక్కడ పేస్ట్ చేయండి",
@@ -50,7 +60,7 @@ start_engine_btn = st.sidebar.button("🚀 Start Engine")
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def load_security_master():
-    """Dhan NSE Scrip Master డేటాను బ్యాక్‌గ్రౌండ్‌లో లోడ్ చేస్తుంది"""
+    """Dhan Scrip Master నుండి NSE Equity Security IDs తెస్తుంది"""
     url = "https://images.dhan.co/api-data/api-scrip-master.csv"
     try:
         df = pd.read_csv(url, low_memory=False)
@@ -64,13 +74,12 @@ def load_security_master():
             sec_id = str(row["SEM_SMST_SECURITY_ID"]).strip()
             scrip_dict[sym] = sec_id
         return scrip_dict
-    except Exception as e:
-        st.error(f"Error loading security master: {e}")
+    except Exception:
         return {}
 
 
 def load_stock_universe(file_path=STOCKS_FILE):
-    """fno_stocks.txt నుండి 230 స్టాక్స్‌ను రీడ్ చేస్తుంది"""
+    """fno_stocks.txt నుండి స్టాక్స్ లిస్ట్ రీడ్ చేస్తుంది"""
     if os.path.exists(file_path):
         with open(file_path, "r") as f:
             stocks = [
@@ -80,7 +89,16 @@ def load_stock_universe(file_path=STOCKS_FILE):
             ]
             if stocks:
                 return stocks
-    return ["ATHERENERG", "COFORGE", "LTIM", "BHEL", "TATAMOTORS", "RELIANCE"]
+    return [
+        "ATHERENERG",
+        "COFORGE",
+        "LTIM",
+        "BHEL",
+        "TATAMOTORS",
+        "RELIANCE",
+        "INFY",
+        "HDFCBANK",
+    ]
 
 
 FO_STOCKS = load_stock_universe()
@@ -88,61 +106,50 @@ SCRIP_MAP = load_security_master()
 
 
 # ==============================================================================
-# 4. టెక్నికల్ ఇండికేటర్స్ & డేటా హెల్పర్స్
+# 4. ఇండికేటర్స్ & డేటా ఫెచింగ్
 # ==============================================================================
 def calculate_indicators(df):
     """9 EMA మరియు ఇంట్రాడే VWAP లెక్కిస్తుంది"""
     if len(df) == 0:
         return df
 
-    # 9 EMA
     df["EMA_9"] = df["close"].ewm(span=9, adjust=False).mean()
 
-    # Intraday VWAP (09:15 నుండి రీసెట్ అవుతుంది)
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     cum_vol = df["volume"].cumsum()
     cum_vp = (typical_price * df["volume"]).cumsum()
     df["VWAP"] = np.where(cum_vol > 0, cum_vp / cum_vol, df["close"])
-
     return df
 
 
-def get_live_intraday_data(dhan, security_id):
-    """Dhan నుండి లైవ్ 1-మినిట్ డేటా పొందుతుంది"""
+def get_live_intraday_data(dhan_obj, security_id):
+    """1-మినిట్ చార్ట్ డేటాను Dhan API నుండి తెస్తుంది"""
     try:
-        resp = dhan.intraday_daily_minute_charts(
+        resp = dhan_obj.intraday_daily_minute_charts(
             security_id=str(security_id),
             exchange_segment="NSE_EQ",
             instrument_type="EQUITY",
         )
-        if resp.get("status") == "success" and "data" in resp:
-            data = resp["data"]
-            df = pd.DataFrame(
-                {
-                    "timestamp": pd.to_datetime(data["timestamp"]),
-                    "open": data["open"],
-                    "high": data["high"],
-                    "low": data["low"],
-                    "close": data["close"],
-                    "volume": data["volume"],
-                }
-            )
-            return df.sort_values("timestamp").reset_index(drop=True)
+        if isinstance(resp, dict) and resp.get("status") == "success":
+            data = resp.get("data", {})
+            if "timestamp" in data and len(data["timestamp"]) > 0:
+                df = pd.DataFrame(
+                    {
+                        "timestamp": pd.to_datetime(data["timestamp"]),
+                        "open": [float(x) for x in data["open"]],
+                        "high": [float(x) for x in data["high"]],
+                        "low": [float(x) for x in data["low"]],
+                        "close": [float(x) for x in data["close"]],
+                        "volume": [float(x) for x in data["volume"]],
+                    }
+                )
+                return df.sort_values("timestamp").reset_index(drop=True)
     except Exception:
         pass
     return pd.DataFrame()
 
 
-def save_detailed_trade(record):
-    """ట్రేడ్ పూర్తవగానే CSV కి ఆటో-సేవ్ చేస్తుంది"""
-    df_new = pd.DataFrame([record])
-    if not os.path.exists(LOG_FILE):
-        df_new.to_csv(LOG_FILE, index=False)
-    else:
-        df_new.to_csv(LOG_FILE, mode="a", header=False, index=False)
-
-
-def scan_top_3_dhan(dhan):
+def scan_top_3_dhan(dhan_obj):
     """09:15:35 AM కి టాప్-3 గెయినర్లను ఫిల్టర్ చేస్తుంది"""
     gainers = []
     for sym in FO_STOCKS:
@@ -150,13 +157,13 @@ def scan_top_3_dhan(dhan):
         if not sec_id:
             continue
         try:
-            quote = dhan.get_quote(
-                security_id=sec_id,
+            quote = dhan_obj.get_quote(
+                security_id=str(sec_id),
                 exchange_segment="NSE_EQ",
                 instrument_type="EQUITY",
             )
-            if quote.get("status") == "success" and "data" in quote:
-                q = quote["data"]
+            if isinstance(quote, dict) and quote.get("status") == "success":
+                q = quote.get("data", {})
                 open_p = float(q.get("open", 0.0))
                 ltp = float(q.get("last_price", 0.0))
                 if open_p > 50.0:
@@ -179,12 +186,21 @@ def scan_top_3_dhan(dhan):
     return []
 
 
+def save_detailed_trade(record):
+    """పూర్తయిన ట్రేడ్ వివరాలను CSV ఫైల్‌కు రాస్తుంది"""
+    df_new = pd.DataFrame([record])
+    if not os.path.exists(LOG_FILE):
+        df_new.to_csv(LOG_FILE, index=False)
+    else:
+        df_new.to_csv(LOG_FILE, mode="a", header=False, index=False)
+
+
 # ==============================================================================
-# 5. UI లేఅవుట్ & స్టేటస్ కార్డ్స్
+# 5. UI డ్యాష్‌బోర్డ్
 # ==============================================================================
 st.title("⚡ Dhan F&O Top-3 Scalper Pro")
 st.caption(
-    f"Universe: {len(FO_STOCKS)} Stocks | Auto Scan (09:15:35) ➔ Monitor (09:16-09:25) ➔ Auto Exit (09:35)"
+    f"Universe: {len(FO_STOCKS)} Stocks | Auto Scan (09:15:35) ➔ Auto Monitor (09:16-09:25) ➔ Auto Exit (09:35)"
 )
 
 col1, col2, col3, col4 = st.columns(4)
@@ -199,22 +215,37 @@ log_box = st.empty()
 
 
 # ==============================================================================
-# 6. ఎగ్జిక్యూషన్ ఇంజిన్ (09:05 నుండి 09:35 వరకు లైఫ్‌సైకిల్)
+# 6. మెయిన్ ఎగ్జిక్యూషన్ ఇంజిన్
 # ==============================================================================
 def run_full_pipeline():
-    if not DHAN_ACCESS_TOKEN or not DHAN_CLIENT_ID:
-        st.error("⚠️ దయచేసి సైడ్‌బార్‌లో మీ Dhan Client ID & Token ఎంటర్ చేయండి!")
+    c_id = str(dhan_client_input).strip()
+    tok = str(dhan_token_input).strip()
+
+    if not c_id or not tok:
+        st.error("⚠️ దయచేసి Client ID మరియు Token రెండింటినీ ఎంటర్ చేయండి!")
         return
 
-    dhan = dhanhq(DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN)
+    if DhanClientClass is None:
+        st.error("⚠️ `dhanhq` ప్యాకేజీ లోడ్ కాలేదు. requirements.txt చెక్ చేయండి.")
+        return
+
+    # ధన్ క్లయింట్ సురక్షిత ఇనిషియలైజేషన్
+    try:
+        dhan = DhanClientClass(c_id, tok)
+    except TypeError:
+        dhan = DhanClientClass(client_id=c_id, access_token=tok)
+    except Exception as e:
+        st.error(f"⚠️ Dhan Connection Error: {e}")
+        return
+
     logs = []
 
     def log(msg):
         t_str = datetime.datetime.now(IST).strftime("%H:%M:%S")
         logs.append(f"[{t_str}] {msg}")
-        log_box.text_area("📜 లైవ్ సిస్టమ్ ఆడిట్ లాగ్స్", "\n".join(logs), height=240)
+        log_box.text_area("📜 సిస్టమ్ ఆడిట్ లాగ్స్", "\n".join(logs), height=230)
 
-    log("✅ Dhan API కనెక్ట్ అయింది. సిస్టమ్ స్టాండ్‌బై మోడ్‌లోకి వెళ్లింది.")
+    log("✅ Dhan API విజయవంతంగా కనెక్ట్ అయింది. స్టాండ్‌బై మోడ్ ఆన్ అయింది.")
 
     state = "WAITING_FOR_091535"
     basket = []
@@ -225,19 +256,21 @@ def run_full_pipeline():
         now_time = now_dt.time()
         today_date = now_dt.strftime("%Y-%m-%d")
 
-        # ----------------------------------------------------------------------
-        # దశ 1: 09:15:35 AM వరకు నిరీక్షణ (Waiting Room)
-        # ----------------------------------------------------------------------
+        # స్టేజ్ 1: 09:15:35 కోసం నిరీక్షణ
         if state == "WAITING_FOR_091535":
             if now_time < SCAN_TIME:
                 diff_sec = int(
                     (
-                        datetime.datetime.combine(datetime.date.today(), SCAN_TIME)
-                        - datetime.datetime.combine(datetime.date.today(), now_time)
+                        datetime.datetime.combine(
+                            datetime.date.today(), SCAN_TIME
+                        )
+                        - datetime.datetime.combine(
+                            datetime.date.today(), now_time
+                        )
                     ).total_seconds()
                 )
                 status_box.info(
-                    f"⏳ మార్కెట్ ఓపెన్ కోసం వేచి చూస్తున్నాం... స్కానింగ్ ప్రారంభానికి ఇంకా **{diff_sec} సెకన్లు** సమయం ఉంది. (ప్రస్తుత సమయం: {now_time.strftime('%H:%M:%S')})"
+                    f"⏳ మార్కెట్ ఓపెన్ కోసం వేచి చూస్తున్నాం... స్కానింగ్‌కు ఇంకా **{diff_sec} సెకన్లు** ఉంది. (సమయం: {now_time.strftime('%H:%M:%S')})"
                 )
                 time.sleep(1)
                 continue
@@ -251,22 +284,20 @@ def run_full_pipeline():
                 b_str = ", ".join(
                     [f"{s['symbol']} (+{s['gain_pct']:.2f}%)" for s in basket]
                 )
-                log(f"🎯 టాప్-3 బాస్కెట్ ఎంపికైంది: {b_str}")
+                log(f"🎯 టాప్-3 బాస్కెట్ లాక్ అయింది: {b_str}")
                 state = "MONITORING_BREAKOUT"
             else:
-                log("డేటా ఫెచ్ విఫలమైంది. 2 సెకన్లలో రీ-ట్రై అవుతుంది...")
+                log("Dhan డేటా ఫెచ్ కాలేదు, 2 సెకన్లలో రీ-ట్రై అవుతుంది...")
                 time.sleep(2)
                 continue
 
-        # ----------------------------------------------------------------------
-        # దశ 2: బ్రేకౌట్ మానిటరింగ్ & ఫస్ట్ ట్రిగ్గర్ (09:16 - 09:25 AM)
-        # ----------------------------------------------------------------------
+        # స్టేజ్ 2: మానిటరింగ్ & ఫస్ట్ బ్రేకౌట్ ట్రిగ్గర్
         elif state == "MONITORING_BREAKOUT":
             if now_time > ENTRY_CUTOFF_TIME:
                 status_box.warning(
                     "⏰ 09:25:00 AM కటాఫ్ ముగిసింది. ఏ స్టాక్‌లోనూ బ్రేకౌట్ రాలేదు (No Trade Day)."
                 )
-                log("09:25 AM Cut-off reached. No trades triggered today.")
+                log("09:25 AM Cut-off reached. Strategy Stopped.")
                 break
 
             status_box.info(
@@ -347,9 +378,7 @@ def run_full_pipeline():
 
             time.sleep(1)
 
-        # ----------------------------------------------------------------------
-        # దశ 3: లైవ్ P&L ట్రాకింగ్ & 09:35 మాండేటరీ క్లోజింగ్
-        # ----------------------------------------------------------------------
+        # స్టేజ్ 3: పొజిషన్ ట్రాకింగ్ & ఎగ్జిట్
         elif state == "TRACKING_TRADE":
             df_pos = get_live_intraday_data(dhan, position["security_id"])
             if len(df_pos) == 0:
@@ -427,7 +456,7 @@ if start_engine_btn:
     run_full_pipeline()
 
 # ==============================================================================
-# 7. ట్రేడ్ బుక్ రిపోర్ట్ & CSV డౌన్‌లోడ్
+# 7. ట్రేడ్ బుక్ & రిపోర్ట్ డౌన్‌లోడ్
 # ==============================================================================
 st.divider()
 st.subheader("📊 ప్రొడక్షన్ ట్రేడ్ బుక్ (Audit Log)")
