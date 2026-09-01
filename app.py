@@ -4,21 +4,90 @@ import time
 from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 
-# DhanHQ లైబ్రరీని సురక్షితంగా లోడ్ చేసే భాగం
-try:
-    import dhanhq
+# ==============================================================================
+# 1. DHAN CLIENT RESOLVER & DIRECT REST FALLBACK
+# ==============================================================================
+class DirectDhanAPI:
+    """DhanHQ లైబ్రరీ లేకుండా నేరుగా పనిచేసే డైరెక్ట్ REST API ఇంజిన్"""
+    def __init__(self, client_id, access_token):
+        self.client_id = str(client_id).strip()
+        self.access_token = str(access_token).strip()
+        self.base_url = "https://api.dhan.co/v2"
+        self.headers = {
+            "access-token": self.access_token,
+            "client-id": self.client_id,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
 
-    if hasattr(dhanhq, "dhanhq"):
-        DhanClientClass = getattr(dhanhq, "dhanhq")
-    else:
-        DhanClientClass = dhanhq
-except Exception as e:
-    DhanClientClass = None
+    def get_quote(self, security_id, exchange_segment="NSE_EQ", instrument_type="EQUITY"):
+        try:
+            url = f"{self.base_url}/marketfeed/quote"
+            payload = {exchange_segment: [int(security_id)]}
+            res = requests.post(url, headers=self.headers, json=payload, timeout=5)
+            if res.status_code == 200:
+                data = res.json().get("data", {}).get(exchange_segment, {}).get(str(security_id), {})
+                ohlc = data.get("ohlc", {})
+                return {
+                    "status": "success",
+                    "data": {
+                        "open": ohlc.get("open", data.get("last_price", 0.0)),
+                        "last_price": data.get("last_price", 0.0)
+                    }
+                }
+        except Exception:
+            pass
+        return {"status": "error"}
+
+    def intraday_daily_minute_charts(self, security_id, exchange_segment="NSE_EQ", instrument_type="EQUITY"):
+        try:
+            url = f"{self.base_url}/charts/intraday"
+            payload = {
+                "securityId": str(security_id),
+                "exchangeSegment": exchange_segment,
+                "instrument": instrument_type
+            }
+            res = requests.post(url, headers=self.headers, json=payload, timeout=5)
+            if res.status_code == 200:
+                return res.json()
+        except Exception:
+            pass
+        return {"status": "error"}
+
+
+def init_dhan_client(client_id, access_token):
+    """అన్ని రకాల ప్యాకేజీ వెర్షన్లను ఆటో-డిటెక్ట్ చేసే ఇనిషియలైజర్"""
+    c_id = str(client_id).strip()
+    tok = str(access_token).strip()
+
+    # 1. అధికారిక ప్యాకేజీని సరిగ్గా లోడ్ చేయడం
+    try:
+        import dhanhq
+        target = dhanhq
+        while hasattr(target, "dhanhq") and not hasattr(target, "get_quote"):
+            sub = getattr(target, "dhanhq")
+            if sub == target:
+                break
+            target = sub
+        if callable(target):
+            try:
+                inst = target(c_id, tok)
+                if hasattr(inst, "get_quote") or hasattr(inst, "intraday_daily_minute_charts"):
+                    return inst
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 2. డైరెక్ట్ REST API ఫాల్‌బ్యాక్
+    return DirectDhanAPI(c_id, tok)
+
 
 # ==============================================================================
-# 1. పేజ్ సెటప్ & టైమ్ జోన్ కాన్ఫిగరేషన్
+# 2. పేజ్ సెటప్ & కాన్ఫిగరేషన్
 # ==============================================================================
 st.set_page_config(
     page_title="Dhan F&O Top-3 Scalper Pro", layout="wide", page_icon="⚡"
@@ -27,22 +96,22 @@ st.set_page_config(
 IST = ZoneInfo("Asia/Kolkata")
 
 # స్ట్రాటజీ స్థిర విలువలు
-VIRTUAL_CAPITAL = 125000.0  # ₹1,25,000 వర్చువల్ మూలధనం
-TARGET_PERCENT = 1.0  # +1.0% టార్గెట్
-SL_PERCENT = 0.5  # -0.5% స్టాప్‌లాస్
-SLIPPAGE_PCT = 0.05  # 0.05% స్లిప్పేజ్
-EST_CHARGES = 40.0  # ₹40 అంచనా ఖర్చులు
+VIRTUAL_CAPITAL = 125000.0
+TARGET_PERCENT = 1.0
+SL_PERCENT = 0.5
+SLIPPAGE_PCT = 0.05
+EST_CHARGES = 40.0
 
 # సమయాలు (IST)
-SCAN_TIME = datetime.time(9, 15, 35)  # 09:15:35 AM స్కానింగ్
-ENTRY_CUTOFF_TIME = datetime.time(9, 25, 0)  # 09:25:00 AM ఎంట్రీ కటాఫ్
-HARD_EXIT_TIME = datetime.time(9, 35, 0)  # 09:35:00 AM మాండేటరీ ఎగ్జిట్
+SCAN_TIME = datetime.time(9, 15, 35)
+ENTRY_CUTOFF_TIME = datetime.time(9, 25, 0)
+HARD_EXIT_TIME = datetime.time(9, 35, 0)
 
 LOG_FILE = "trade_history.csv"
 STOCKS_FILE = "fno_stocks.txt"
 
 # ==============================================================================
-# 2. సైడ్‌బార్ - డైలీ లాగిన్
+# 3. సైడ్‌బార్ - లాగిన్ & కంట్రోల్స్
 # ==============================================================================
 st.sidebar.header("🔑 Dhan API లాగిన్")
 dhan_client_input = st.sidebar.text_input("Client ID", value="1113235897")
@@ -56,11 +125,10 @@ start_engine_btn = st.sidebar.button("🚀 Start Engine")
 
 
 # ==============================================================================
-# 3. సెక్యూరిటీ మాస్టర్ & స్టాక్స్ లోడింగ్
+# 4. సెక్యూరిటీ మాస్టర్ & స్టాక్స్ లోడింగ్
 # ==============================================================================
 @st.cache_data(ttl=86400)
 def load_security_master():
-    """Dhan Scrip Master నుండి NSE Equity Security IDs తెస్తుంది"""
     url = "https://images.dhan.co/api-data/api-scrip-master.csv"
     try:
         df = pd.read_csv(url, low_memory=False)
@@ -79,7 +147,6 @@ def load_security_master():
 
 
 def load_stock_universe(file_path=STOCKS_FILE):
-    """fno_stocks.txt నుండి స్టాక్స్ లిస్ట్ రీడ్ చేస్తుంది"""
     if os.path.exists(file_path):
         with open(file_path, "r") as f:
             stocks = [
@@ -89,16 +156,7 @@ def load_stock_universe(file_path=STOCKS_FILE):
             ]
             if stocks:
                 return stocks
-    return [
-        "ATHERENERG",
-        "COFORGE",
-        "LTIM",
-        "BHEL",
-        "TATAMOTORS",
-        "RELIANCE",
-        "INFY",
-        "HDFCBANK",
-    ]
+    return ["ATHERENERG", "COFORGE", "LTIM", "BHEL", "TATAMOTORS", "RELIANCE", "INFY", "HDFCBANK"]
 
 
 FO_STOCKS = load_stock_universe()
@@ -106,10 +164,9 @@ SCRIP_MAP = load_security_master()
 
 
 # ==============================================================================
-# 4. ఇండికేటర్స్ & డేటా ఫెచింగ్
+# 5. టెక్నికల్ ఇండికేటర్స్ & డేటా హెల్పర్స్
 # ==============================================================================
 def calculate_indicators(df):
-    """9 EMA మరియు ఇంట్రాడే VWAP లెక్కిస్తుంది"""
     if len(df) == 0:
         return df
 
@@ -123,7 +180,6 @@ def calculate_indicators(df):
 
 
 def get_live_intraday_data(dhan_obj, security_id):
-    """1-మినిట్ చార్ట్ డేటాను Dhan API నుండి తెస్తుంది"""
     try:
         resp = dhan_obj.intraday_daily_minute_charts(
             security_id=str(security_id),
@@ -150,7 +206,6 @@ def get_live_intraday_data(dhan_obj, security_id):
 
 
 def scan_top_3_dhan(dhan_obj):
-    """09:15:35 AM కి టాప్-3 గెయినర్లను ఫిల్టర్ చేస్తుంది"""
     gainers = []
     for sym in FO_STOCKS:
         sec_id = SCRIP_MAP.get(sym)
@@ -187,7 +242,6 @@ def scan_top_3_dhan(dhan_obj):
 
 
 def save_detailed_trade(record):
-    """పూర్తయిన ట్రేడ్ వివరాలను CSV ఫైల్‌కు రాస్తుంది"""
     df_new = pd.DataFrame([record])
     if not os.path.exists(LOG_FILE):
         df_new.to_csv(LOG_FILE, index=False)
@@ -196,7 +250,7 @@ def save_detailed_trade(record):
 
 
 # ==============================================================================
-# 5. UI డ్యాష్‌బోర్డ్
+# 6. UI డ్యాష్‌బోర్డ్
 # ==============================================================================
 st.title("⚡ Dhan F&O Top-3 Scalper Pro")
 st.caption(
@@ -215,7 +269,7 @@ log_box = st.empty()
 
 
 # ==============================================================================
-# 6. మెయిన్ ఎగ్జిక్యూషన్ ఇంజిన్
+# 7. మెయిన్ ఎగ్జిక్యూషన్ ఇంజిన్
 # ==============================================================================
 def run_full_pipeline():
     c_id = str(dhan_client_input).strip()
@@ -225,18 +279,8 @@ def run_full_pipeline():
         st.error("⚠️ దయచేసి Client ID మరియు Token రెండింటినీ ఎంటర్ చేయండి!")
         return
 
-    if DhanClientClass is None:
-        st.error("⚠️ `dhanhq` ప్యాకేజీ లోడ్ కాలేదు. requirements.txt చెక్ చేయండి.")
-        return
-
-    # ధన్ క్లయింట్ సురక్షిత ఇనిషియలైజేషన్
-    try:
-        dhan = DhanClientClass(c_id, tok)
-    except TypeError:
-        dhan = DhanClientClass(client_id=c_id, access_token=tok)
-    except Exception as e:
-        st.error(f"⚠️ Dhan Connection Error: {e}")
-        return
+    # ధన్ క్లయింట్ ఆటో ఇనిషియలైజేషన్
+    dhan = init_dhan_client(c_id, tok)
 
     logs = []
 
@@ -456,7 +500,7 @@ if start_engine_btn:
     run_full_pipeline()
 
 # ==============================================================================
-# 7. ట్రేడ్ బుక్ & రిపోర్ట్ డౌన్‌లోడ్
+# 8. ట్రేడ్ బుక్ & రిపోర్ట్ డౌన్‌లోడ్
 # ==============================================================================
 st.divider()
 st.subheader("📊 ప్రొడక్షన్ ట్రేడ్ బుక్ (Audit Log)")
